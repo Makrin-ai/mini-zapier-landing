@@ -1,0 +1,89 @@
+services:
+
+  postgres:
+    image: postgres:16-alpine
+
+    environment:
+      POSTGRES_DB: mntnflow
+      POSTGRES_USER: mntn
+      POSTGRES_PASSWORD: mntn_dev_password
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U mntn -d mntnflow
+
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+
+  redis:
+    image: redis:7-alpine
+
+    ports:
+      - "6379:6379"
+
+    healthcheck:
+      test:
+        - CMD
+        - redis-cli
+        - ping
+
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+
+  api:
+    build: ./backend
+
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+    environment:
+      DATABASE_URL: postgresql+psycopg://mntn:mntn_dev_password@postgres:5432/mntnflow
+      REDIS_URL: redis://redis:6379/0
+      CORS_ORIGINS: http://localhost:5173
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - ./backend:/app
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+
+  worker:
+    build: ./backend
+
+    command: celery -A app.workers.celery_app.celery_app worker --loglevel=INFO
+
+    environment:
+      DATABASE_URL: postgresql+psycopg://mntn:mntn_dev_password@postgres:5432/mntnflow
+      REDIS_URL: redis://redis:6379/0
+
+    volumes:
+      - ./backend:/app
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      redis:
+        condition: service_healthy
+
+
+volumes:
+  postgres_data:
